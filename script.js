@@ -3,6 +3,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// colour codes for weather alerts
+const colourCodes = {
+  heat: "#EB96AA",
+  red: "#C54B6C",
+  fire: "#C54B6C",
+  flood: "#B6D8F2",
+  wind: "#5784BA",
+  thunderstorm: "#F7CE76",
+};
+
 //Width and height
 const w = 1100;
 const h = 500;
@@ -274,7 +284,6 @@ function drawMap(alerts) {
       .enter()
       .append("path")
       .attr("d", path)
-      .attr("name", "fukkin hell")
       .style("fill", (d) => {
         const value = d.properties.value;
         if (value) {
@@ -294,10 +303,21 @@ function drawMap(alerts) {
       )
       .attr("headline", (d) => d.properties.headline)
       .attr("class", "alert-path")
-      .style("fill", "#E5B3BB")
-      .style("opacity", 0.6)
+      .style("fill", (d) => d.relevant_colour)
+      // .style("fill", "#E5B3BB")
+      // .style("fill", (d) => {
+      //   const header = d.properties.headline.toLowerCase();
+      //   console.log(header);
+      //   for (item in colourCodes) {
+      //     if (header.includes(item)) {
+      //       return colourCodes[item];
+      //     }
+      //   }
+      //   return "#BEB4C5";
+      // })
+      .style("opacity", 0.35)
       .on("mouseover", (event, d) => {
-        // console.log(d.properties.event);
+        console.log(d);
         // console.log(d.properties.headline);
         // console.log(event.path[0]);
         d3.select(event.path[0])
@@ -321,7 +341,7 @@ function drawMap(alerts) {
           .transition()
           .duration(600)
           .style("stroke", "none")
-          .style("opacity", 0.6);
+          .style("opacity", 0.35);
 
         div.transition().duration(500).style("opacity", 0);
       });
@@ -346,32 +366,45 @@ async function awaitData(link) {
   return data;
 }
 
+// a separate dictionary is used to backup polygons to be reused by other polygons
+// (this would result in shorter loading time)
+let backedUppedPolygons = {};
+
 async function enrichData(alerts) {
   let newAlerts = [];
   for (const alert of alerts) {
-    if (alert.geometry == null) {
-      if (alert.properties.affectedZones.length == 1) {
-        const newData = await awaitData(alert.properties.affectedZones[0]);
+    // if (alert.geometry == null) {
+    if (alert.properties.affectedZones.length == 1) {
+      const theZone = alert.properties.affectedZones[0];
+      if (theZone in backedUppedPolygons) {
+        const newData = backedUppedPolygons[theZone];
         alert.geometry = newData.data.geometry;
         newAlerts.push(alert);
       } else {
-        for (const zone of alert.properties.affectedZones) {
+        const newData = await awaitData(theZone);
+        backedUppedPolygons[theZone] = newData;
+        alert.geometry = newData.data.geometry;
+        newAlerts.push(alert);
+      }
+    } else {
+      for (const zone of alert.properties.affectedZones) {
+        if (zone in backedUppedPolygons) {
+          const newData = backedUppedPolygons[zone];
+          alert.geometry = newData.data.geometry;
+          newAlerts.push(alert);
+        } else {
           const newData = await awaitData(zone);
+          backedUppedPolygons[zone] = newData;
           alert.geometry = newData.data.geometry;
           newAlerts.push(alert);
         }
       }
-      // const newData = await awaitData(alert.properties.affectedZones[0]);
-      // if (newData.data.geometry.type === "MultiPolygon") {
-      //   newData.data.geometry.type = "Polygon";
-      //   newData.data.geometry.coordinates =
-      //     newData.data.geometry.coordinates[0];
-      // }
-      // alert.geometry = newData.data.geometry;
-    } else {
-      newAlerts.push(alert);
     }
+    // } else {
+    //   newAlerts.push(alert);
+    // }
   }
+  console.log(backedUppedPolygons);
   return newAlerts;
 }
 
@@ -387,13 +420,68 @@ Promise.all([awaitData("https://api.weather.gov/alerts/active")]).then(
   (data) => {
     let alerts = data[0].data.features;
     console.log(alerts);
+    alerts.forEach((d) => {
+      try {
+        d.geometry = turf.rewind(d.geometry, { reverse: true });
+      } catch (err) {
+        console.error(err);
+      }
+    });
     drawMap(alerts);
     Promise.all([enrichData(alerts)]).then((enrichedData) => {
-      newData = enrichedData[0];
+      let newData = enrichedData[0];
+      newData.forEach((d) => {
+        try {
+          d.geometry = turf.simplify(d.geometry, {
+            tolerance: 0.05,
+            highQuality: false,
+            mutate: true,
+          });
+          d.geometry = turf.rewind(d.geometry, { reverse: true });
+        } catch (err) {
+          console.error(err);
+        }
+        const header =
+          d.properties.headline != null
+            ? d.properties.headline.toLowerCase()
+            : "";
+        let coloured = false;
+        let relevant_colour = "";
+        for (item in colourCodes) {
+          if (header.includes(item)) {
+            relevant_colour = colourCodes[item];
+            coloured = true;
+          }
+        }
+        if (!coloured) {
+          relevant_colour = "#BEB4C5";
+        }
+        // const relevent_colour = () => {
+        //   for (item in colourCodes) {
+        //     if (header.includes(item)) {
+        //       console.log()
+        //       return colourCodes[item];
+        //     }
+        //   }
+        //   return "#BEB4C5";
+        // };
+        d.relevant_colour = relevant_colour;
+        // const header = d.properties.headline.toLowerCase();
+        // console.log(header);
+        // for (item in colourCodes) {
+        //   if (header.includes(item)) {
+        //     return colourCodes[item];
+        //   }
+        // }
+        // return "#BEB4C5";
+      });
+      const filteredData = newData.filter((elem, pos, arr) => {
+        return arr.indexOf(elem) == pos;
+      });
       console.log("enrichment complete");
-      console.log(newData);
+      console.log(filteredData);
       d3.select(container).html(null);
-      drawMap(newData);
+      drawMap(filteredData);
       // checkDataForCompleteness(enrichedData);
     });
   }

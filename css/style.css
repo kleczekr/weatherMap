@@ -29,6 +29,7 @@
 			.zoom rect {
 				fill: black;
 				opacity: 0.2;
+                cursor: pointer;
 			}
 			
 			.zoom rect {
@@ -48,6 +49,7 @@
 			.zoom:hover rect,
  			.zoom:hover text {
 				fill: blue;
+                cursor: pointer;
 			}
             /* Style for Custom Tooltip */
             div.tooltip {   
