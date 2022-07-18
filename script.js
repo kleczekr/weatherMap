@@ -422,7 +422,7 @@ Promise.all([awaitData("https://api.weather.gov/alerts/active")]).then(
     console.log(alerts);
     alerts.forEach((d) => {
       try {
-        d.geometry = turf.rewind(d.geometry, { reverse: true });
+        // d.geometry = turf.rewind(d.geometry, { reverse: true });
       } catch (err) {
         console.error(err);
       }
@@ -430,14 +430,19 @@ Promise.all([awaitData("https://api.weather.gov/alerts/active")]).then(
     drawMap(alerts);
     Promise.all([enrichData(alerts)]).then((enrichedData) => {
       let newData = enrichedData[0];
+      // Get rid of GeometryCollection objects, they cause problems
+      newData = newData.filter((d) => d.geometry.type != "GeometryCollection");
       newData.forEach((d) => {
+        // simplify and rewind the polygons to ensure faster functioning
+        // and proper order of polygons (D3 requires polygon points to be in
+        // clockwise order)
         try {
           d.geometry = turf.simplify(d.geometry, {
-            tolerance: 0.05,
+            tolerance: 0.1,
             highQuality: false,
             mutate: true,
           });
-          d.geometry = turf.rewind(d.geometry, { reverse: true });
+          d.geometry = turf.rewind(d.geometry, { reverse: true, mutate: true });
         } catch (err) {
           console.error(err);
         }
